@@ -30,8 +30,14 @@ jobs:
       - name: Signing key (the same every time, so updates install over the old app)
         id: key
         env:
-          PW: ${{ secrets.MARGIN_KEY_PASSWORD }}
+          PW: ${{ secrets.MARGIN_KEY_PASSWORD || vars.MARGIN_KEY_PASSWORD }}
+          S1: ${{ secrets.MARGIN_KEY_PASSWORD }}
+          S2: ${{ secrets.MARGIN_KEYSTORE_B64 }}
+          V1: ${{ vars.MARGIN_KEY_PASSWORD }}
+          V2: ${{ vars.MARGIN_KEYSTORE_B64 }}
         run: |
+          # what this build can see (lengths only, never the values)
+          echo "secret MARGIN_KEY_PASSWORD: ${#S1} characters; secret MARGIN_KEYSTORE_B64: ${#S2}; variable MARGIN_KEY_PASSWORD: ${#V1}; variable MARGIN_KEYSTORE_B64: ${#V2}"
           # the key is stored in the repository locked with the MARGIN_KEY_PASSWORD secret
           pw=$(printf '%s' "$PW" | tr -d ' \r\n\t')
           if [ -n "$pw" ] && openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/margin.p12.enc -out android/app/margin.p12 -pass pass:"$pw" 2>/dev/null \
@@ -47,7 +53,7 @@ jobs:
       - name: Build
         working-directory: android
         env:
-          MARGIN_KEY_PASSWORD: ${{ steps.key.outputs.real == 'yes' && secrets.MARGIN_KEY_PASSWORD || 'margin' }}
+          MARGIN_KEY_PASSWORD: ${{ steps.key.outputs.real == 'yes' && (secrets.MARGIN_KEY_PASSWORD || vars.MARGIN_KEY_PASSWORD) || 'margin' }}
         run: gradle assembleRelease --no-daemon --stacktrace
       - name: Collect
         run: cp android/app/build/outputs/apk/release/app-release.apk Margin.apk
