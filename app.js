@@ -107,8 +107,9 @@ async function loadBook(book, data) {
   if (hasCssHL()) CSS.highlights.clear();
   S.renderToken++; S.texts.clear(); S.pages = []; pagesEl.innerHTML = ''; pagesEl.hidden = false; io?.disconnect();
   const u8 = new Uint8Array(data, 0, 4);
-  S.kind = book.kind || (u8[0] === 0x50 && u8[1] === 0x4b ? 'epub' : 'pdf');
+  S.kind = book.kind === 'text' ? 'epub' : book.kind || (u8[0] === 0x50 && u8[1] === 0x4b ? 'epub' : 'pdf');
   pagesEl.classList.toggle('epub', S.kind === 'epub');
+  if (book.kind === 'text') { await loadEpub(book, data, textEpub(book, new TextDecoder().decode(data))); return; }
   if (S.kind === 'epub') { await loadEpub(book, data); return; }
   S.secTitles = null; S.fit = true; S.scale = 1; $('bFit').classList.add('on');
   S.doc = await pdfjsLib.getDocument({ data, cMapUrl: './lib/pdfjs/cmaps/', cMapPacked: true, standardFontDataUrl: './lib/pdfjs/standard_fonts/' }).promise;
@@ -140,9 +141,9 @@ function restorePosition(book) {
 }
 
 /* ---------------- EPUB ---------------- */
-async function loadEpub(book, data) {
+async function loadEpub(book, data, given) {
   S.labels = null;
-  const ep = await openEpub(data); S.epub = ep;
+  const ep = given || await openEpub(data); S.epub = ep;
   if (!book.title && ep.title) { book.title = ep.title; }
   book.count = ep.spine.length; if (!book.author && ep.author) book.author = ep.author; DB.putBook(book);
   if (!book.cover) ep.cover().then(imageCover).then((c) => { if (c) { book.cover = c; DB.putBook(book); } }).catch(() => {});
@@ -875,7 +876,7 @@ async function showBookPage(id) {
   pg.append(back, top, desc);
   $('welcome').scrollTop = 0; back.focus();
 }
-async function refreshLibBooks() { const all = await DB.books(); libBooks = all.filter((b) => !b.hidden); }
+async function refreshLibBooks() { const all = await DB.books(); libBooks = all.filter((b) => !b.hidden && b.kind !== 'text'); }
 
 /* ---------------- New books: check or add their details ---------------- */
 async function showNewBooks() {
@@ -1088,7 +1089,7 @@ function renderCatalog() {
 }
 async function showLibrary(rescan = true) {
   setView('library');
-  const all = await DB.books(); libBooks = all.filter((b) => !b.hidden);
+  const all = await DB.books(); libBooks = all.filter((b) => !b.hidden && b.kind !== 'text');
   const hiddenCount = all.length - libBooks.length; $('bUnhide').hidden = !hiddenCount; $('bUnhide').textContent = `Show hidden books (${hiddenCount})`;
   const has = libBooks.length > 0;
   $('welcome').classList.toggle('has-books', has);
@@ -1838,7 +1839,7 @@ async function ttsPlay(page, char = 0) {
       }
       page++;
     }
-    if (tok === T.token) { ttsStop(); setStatus('Reached the end of the book.'); }
+    if (tok === T.token) { ttsStop(); setStatus((S.book?.kind === 'text' ? 'Reached the end of the text.' : 'Reached the end of the book.')); }
   } catch (err) {
     if (tok === T.token) { console.error(err); ttsStop(); setStatus('Reading stopped: ' + esc(err.message || String(err))); }
   }
@@ -2261,7 +2262,7 @@ $('bWExport').onclick = () => {
 };
 /* ---------------- Notes and Words pages (top bar) ----------------
    Every highlight and saved word from all books, with search. Reading aloud carries on. */
-function setView(v) { S.view = v; for (const [id, k] of [['bLib', 'library'], ['bReader', 'book'], ['bNotes', 'notes'], ['bWords', 'words']]) $(id).classList.toggle('on', v === k); }
+function setView(v) { S.view = v; for (const [id, k] of [['bLib', 'library'], ['bReader', 'book'], ['bNotes', 'notes'], ['bWords', 'words'], ['bText', 'text']]) $(id).classList.toggle('on', v === k); }
 // go to a book: back to it if it is the open one (no reload, reading aloud keeps going), otherwise open it
 async function showInBook(id) {
   if (S.book?.id === id) { if (libraryOpen()) backToBook(); return true; }
@@ -2435,6 +2436,101 @@ function showWordsPage() {
   wordsDraw();
   P.search.focus();
 }
+/* ---------------- Text: paste anything and listen ----------------
+   Pasted text is kept as a small "book" (kind 'text') that is not shown in the Library.
+   It opens in the reader like a one-chapter EPUB, so the voice, word highlighting,
+   highlights, notes and Save word all work on it. */
+function textEpub(book, text) {
+  const paras = text.replace(/\r\n?/g, '\n').split(/\n\s*\n|\n(?=\s*[-•*]\s)/).map((t) => t.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean);
+  // very long texts are split into parts so the page stays quick
+  const parts = []; let cur = [], n = 0;
+  for (const t of paras) { cur.push(t); n += t.length; if (n > 30000) { parts.push(cur); cur = []; n = 0; } }
+  if (cur.length || !parts.length) parts.push(cur);
+  const title = book.title || 'Text';
+  return {
+    title, author: '', spine: parts.map((_, i) => ({ path: 'part' + i })),
+    toc: parts.map((_, i) => ({ title: parts.length > 1 ? `Part ${i + 1}` : title, path: 'part' + i, items: [] })),
+    spineIndex: (p) => +String(p).replace('part', ''),
+    chapter: async (i) => { const f = document.createDocumentFragment(); for (const t of parts[i]) f.append(el('p', '', t)); if (!parts[i].length) f.append(el('p', '', ' ')); return f; },
+    cover: async () => null, pages: async () => ({ pages: Math.max(1, Math.round(text.length / 2000)), estimated: true }),
+    close() {},
+  };
+}
+const textTitle = (t) => { const line = t.trim().split(/\n/)[0].replace(/\s+/g, ' ').trim(); return line.length > 60 ? line.slice(0, 57).replace(/\s+\S*$/, '') + '…' : line || 'Text'; };
+const wordCount = (t) => (t.match(/\S+/g) || []).length;
+let textEditing = null; // the saved text being changed, if any
+async function saveText(text, title, id) {
+  const now = Date.now();
+  let book = id ? await DB.getBook(id) : null;
+  if (book) {
+    const old = await DB.getFile(id); const before = old ? await old.text() : '';
+    if (before !== text) { for (const h of await DB.hls(id)) await DB.delHl(h.id); book.lastPage = 1; book.lastFrac = 0; book.model = null; }
+  } else book = { id: 'text-' + now, name: 'Text', kind: 'text', added: now, year: null, cover: null };
+  book.title = title || textTitle(text); book.words = wordCount(text); book.pages = Math.max(1, Math.round(text.length / 2000)); book.pagesEstimated = true;
+  await DB.putFile(book.id, new Blob([text], { type: 'text/plain' }));
+  await DB.putBook(book);
+  return book;
+}
+async function showTextPage(prefill) {
+  const P = openAllPage('text', 'Text');
+  P.search.remove();
+  P.count.textContent = 'Paste or type anything, then listen';
+  const box = el('div', 'tx-box');
+  const title = el('input'); title.type = 'text'; title.placeholder = 'Title (optional)'; title.className = 'tx-title'; title.setAttribute('aria-label', 'Title');
+  const ta = el('textarea', 'tx-text'); ta.placeholder = 'Paste text here: an article, a message, notes, a chapter…'; ta.setAttribute('aria-label', 'Text to read aloud'); ta.spellcheck = false;
+  const info = el('span', 'tx-info');
+  const paste = el('button', 'btn', 'Paste'); paste.title = 'Paste what you copied';
+  const clear = el('button', 'btn', 'Clear');
+  const open = el('button', 'btn', 'Open'); open.title = 'Open it in the reader without starting the voice';
+  const go = el('button', 'btn primary tx-go'); go.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M7 5v14l12-7z"/></svg> Read aloud';
+  const row = el('div', 'tx-row'); row.append(paste, clear, info, el('span', 'sp'), open, go);
+  box.append(title, ta, row);
+  const listHead = el('h2', 'tx-h', 'Saved texts');
+  const list = el('div', 'tx-list');
+  P.list.replaceWith(box); box.after(listHead, list);
+  textEditing = null;
+  if (prefill) { textEditing = prefill.id; ta.value = prefill.text || ''; title.value = prefill.title && prefill.title !== textTitle(ta.value) ? prefill.title : ''; }
+  const upd = () => { const w = wordCount(ta.value); info.textContent = w ? `${w} word${w === 1 ? '' : 's'} · about ${Math.max(1, Math.round(w / 160))} min` : ''; go.disabled = open.disabled = !w; clear.hidden = !ta.value; };
+  ta.addEventListener('input', upd); upd();
+  paste.onclick = async () => {
+    try { const t = await navigator.clipboard.readText(); if (!t) { toast('Nothing copied yet.'); return; } ta.setRangeText(t, ta.selectionStart, ta.selectionEnd, 'end'); upd(); ta.focus(); }
+    catch { ta.focus(); toast('Press and hold in the box and choose Paste (or Ctrl+V).'); }
+  };
+  clear.onclick = () => { ta.value = ''; title.value = ''; textEditing = null; upd(); ta.focus(); };
+  const start = async (play) => {
+    const t = ta.value.trim(); if (!t) return;
+    const book = await saveText(t, title.value.trim(), textEditing);
+    await openStored(book.id);
+    if (play && S.book?.id === book.id) setTimeout(() => { if (!T.playing) togglePlay(); }, 150);
+  };
+  go.onclick = () => start(true); open.onclick = () => start(false);
+  ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); start(true); } });
+  const drawList = async () => {
+    const texts = (await DB.books()).filter((b) => b.kind === 'text').sort((a, b) => (b.opened || b.added || 0) - (a.opened || a.added || 0));
+    listHead.hidden = !texts.length; list.innerHTML = '';
+    for (const b of texts) {
+      const r = el('div', 'tx-item');
+      const main = el('button', 'tx-open'); main.title = 'Open in the reader';
+      main.append(el('b', '', b.title || 'Text'), el('span', '', [b.words ? `${b.words} words` : '', fmtDate(b.opened || b.added)].filter(Boolean).join(' · ')));
+      main.onclick = () => openStored(b.id);
+      const edit = el('button', 'linkbtn', 'Edit'); edit.title = 'Change the text';
+      edit.onclick = async () => { const f = await DB.getFile(b.id); showTextPage({ id: b.id, title: b.title, text: f ? await f.text() : '' }); };
+      const del = el('button', 'linkbtn', 'Delete');
+      del.onclick = async () => {
+        if (!del.dataset.armed) { del.dataset.armed = 1; del.textContent = 'Confirm delete'; del.classList.add('danger'); setTimeout(() => { if (del.isConnected) { delete del.dataset.armed; del.textContent = 'Delete'; del.classList.remove('danger'); } }, 3000); return; }
+        if (S.book?.id === b.id) { ttsStop(); }
+        for (const h of await DB.hls(b.id)) await DB.delHl(h.id);
+        await DB.delFile(b.id); await DB.delBook(b.id);
+        if (S.book?.id === b.id) { S.book = null; setView('text'); }
+        drawList();
+      };
+      r.append(main, edit, del); list.append(r);
+    }
+  };
+  drawList();
+  setTimeout(() => ta.focus(), 50);
+}
+$('bText').onclick = () => showTextPage();
 $('bNotes').onclick = () => showNotesPage();
 $('bWords').onclick = () => showWordsPage();
 
