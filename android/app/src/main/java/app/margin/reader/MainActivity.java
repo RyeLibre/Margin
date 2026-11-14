@@ -97,7 +97,7 @@ public class MainActivity extends Activity {
                 if (fullView != null) { cb.onCustomViewHidden(); return; }
                 fullView = view; fullCallback = cb;
                 ((FrameLayout) getWindow().getDecorView()).addView(view, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-                setImmersive(true);
+                hideBars(true);
             }
 
             @Override
@@ -105,7 +105,7 @@ public class MainActivity extends Activity {
                 if (fullView == null) return;
                 ((FrameLayout) getWindow().getDecorView()).removeView(fullView);
                 fullView = null;
-                setImmersive(false);
+                hideBars(false);
                 if (fullCallback != null) fullCallback.onCustomViewHidden();
                 fullCallback = null;
             }
@@ -205,7 +205,7 @@ public class MainActivity extends Activity {
     }
 
     @SuppressWarnings("deprecation")
-    void setImmersive(boolean on) {
+    void hideBars(boolean on) {
         View d = getWindow().getDecorView();
         if (on) d.setSystemUiVisibility(View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE

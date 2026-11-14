@@ -17,9 +17,9 @@ android {
         release {
             // the same key every time, so updates install over the old app (kept as a GitHub secret)
             storeFile file(System.getenv('MARGIN_KEYSTORE') ?: 'margin.p12')
-            storePassword System.getenv('MARGIN_KEY_PASSWORD') ?: 'margin'
+            storePassword((System.getenv('MARGIN_KEY_PASSWORD') ?: 'margin').trim())
             keyAlias 'margin'
-            keyPassword System.getenv('MARGIN_KEY_PASSWORD') ?: 'margin'
+            keyPassword((System.getenv('MARGIN_KEY_PASSWORD') ?: 'margin').trim())
             storeType 'pkcs12'
         }
     }
