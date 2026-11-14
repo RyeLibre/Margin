@@ -1,0 +1,13 @@
+devtools socket: webview_devtools_remote_2911
+page: https://margin.example/index.html
+android shim: True
+bridge: True
+cross-origin isolated: False
+theme: dark
+engine/voices: ['system', 17, ['English (United States) 1 (en-US)', 'English (United States) 10 (en-US)', 'English (United States) 11 (en-US) · online', 'English (United States) 12 (en-US)']]
+open book: A Test Book
+play: clicked
+after play: ['One · The river ran north through the valley, and the people who lived beside it planted rice in the wet months and hunted in the dry ones.', 'Pause']
+in background, still playing: Pause
+back button: True
+notes page: ok
