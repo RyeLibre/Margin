@@ -33,7 +33,11 @@ jobs:
           KEY: ${{ secrets.MARGIN_KEYSTORE_B64 }}
         run: |
           if [ -n "$KEY" ]; then
-            echo "$KEY" | base64 -d > android/app/margin.p12
+            # spaces or line breaks picked up while pasting the secret are ignored
+            printf '%s' "$KEY" | tr -cd 'A-Za-z0-9+/=' | base64 -d > android/app/margin.p12 || true
+            got=$(sha256sum android/app/margin.p12 | cut -c1-64)
+            echo "key fingerprint: $got (expected feaf1f72bf671452cb67b79edee64abb41be3c8ff8bebf0a706e96cc9a3d9fe3)"
+            if [ "$got" != "feaf1f72bf671452cb67b79edee64abb41be3c8ff8bebf0a706e96cc9a3d9fe3" ]; then echo "::error::The MARGIN_KEYSTORE_B64 secret is not the Margin key. Paste the whole of MARGIN_KEYSTORE_B64.txt again."; exit 1; fi
             echo "real=yes" >> "$GITHUB_OUTPUT"
           else
             # no key stored yet: a throwaway one, only to check that the app builds (not published)
