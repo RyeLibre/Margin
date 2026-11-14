@@ -758,10 +758,11 @@ async function googleBooks(title, author, isbn) {
     source: 'Google Books', title: [v.title, v.subtitle].filter(Boolean).join(': '), author: (v.authors || []).join(', '), year: parseInt(v.publishedDate, 10) || null,
     publisher: v.publisher || '', description: htmlToText(v.description || ''), pageCount: v.pageCount || 0, language: v.language || '',
     subjects: v.categories || [], isbn: ((v.industryIdentifiers || []).find((x) => x.type === 'ISBN_13') || (v.industryIdentifiers || [])[0] || {}).identifier || '',
+    cover: (v.imageLinks?.thumbnail || v.imageLinks?.smallThumbnail || '').replace(/^http:/, 'https:').replace(/&edge=curl/, ''),
   })) };
 }
 async function openLibrary(title, author, isbn) {
-  const f = '&fields=key,title,subtitle,author_name,first_publish_year,publisher,isbn,number_of_pages_median,language,subject&limit=8';
+  const f = '&fields=key,title,subtitle,author_name,first_publish_year,publisher,isbn,number_of_pages_median,language,subject,cover_i&limit=8';
   let res = { data: {} };
   if (isbn) res = await getJson('https://openlibrary.org/search.json?isbn=' + encodeURIComponent(isbn) + f);
   if (!res.error && !(res.data.docs || []).length && title) res = await getJson('https://openlibrary.org/search.json?title=' + encodeURIComponent(title) + (author ? '&author=' + encodeURIComponent(author.split(/,/)[0]) : '') + f);
@@ -771,6 +772,7 @@ async function openLibrary(title, author, isbn) {
     source: 'Open Library', key: d.key, title: [d.title, d.subtitle].filter(Boolean).join(': '), author: (d.author_name || []).slice(0, 3).join(', '),
     year: d.first_publish_year || null, publisher: (d.publisher || [])[0] || '', description: '', pageCount: d.number_of_pages_median || 0,
     language: ISO3[(d.language || [])[0]] || '', subjects: (d.subject || []).slice(0, 6), isbn: (d.isbn || []).find((x) => x.length === 13) || (d.isbn || [])[0] || '',
+    cover: d.cover_i ? `https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg` : '',
   })) };
 }
 // Open Library keeps the description on the work page
@@ -779,8 +781,8 @@ async function olDescription(key) {
   const r = await getJson('https://openlibrary.org' + key + '.json'); const d = r.data?.description;
   return htmlToText(typeof d === 'string' ? d : d?.value || '');
 }
-async function searchBooks() {
-  const title = searchTitle($('edTitle').value), author = $('edAuthor').value.trim(), isbn = $('edIsbn').value.replace(/[^\dXx]/g, '');
+async function searchBooks(q) {
+  const title = searchTitle(q ? q.title || '' : $('edTitle').value), author = (q ? q.author || '' : $('edAuthor').value).trim(), isbn = (q ? q.isbn || '' : $('edIsbn').value).replace(/[^\dXx]/g, '');
   const [g, o] = await Promise.all([googleBooks(title, author, isbn), openLibrary(title, author, isbn)]);
   const seen = new Set(), items = [];
   for (const it of [...o.items.slice(0, 6), ...g.items.slice(0, 4)]) {
@@ -801,9 +803,7 @@ $('edFind').onclick = async () => {
   }
   box.append(el('div', 'due', 'Pick the matching book. Its details fill in below; nothing is saved until you press Save.' + (errors.length ? ` (${errors[0]}, so only the other source is shown.)` : '')));
   for (const it of items) {
-    const row = el('button', 'res'); row.type = 'button';
-    const t = el('div', 'rt'); t.append(el('b', '', it.title || 'Untitled'), el('span', '', [it.author, it.year, it.publisher, it.source].filter(Boolean).join(' · ')));
-    row.append(t);
+    const row = resultRow(it);
     row.onclick = async () => {
       box.querySelectorAll('.res').forEach((x) => x.classList.remove('on')); row.classList.add('on');
       if (it.title) $('edTitle').value = it.title; if (it.author) $('edAuthor').value = it.author; if (it.year) $('edYear').value = it.year;
@@ -814,6 +814,25 @@ $('edFind').onclick = async () => {
     box.append(row);
   }
 };
+
+// one search result: small cover, title, and what is known
+function resultRow(it) {
+  const row = el('button', 'res'); row.type = 'button';
+  const th = el('span', 'rth'); if (it.cover) { const img = el('img'); img.src = it.cover; img.alt = ''; img.loading = 'lazy'; img.onerror = () => img.remove(); th.append(img); }
+  const t = el('div', 'rt'); t.append(el('b', '', it.title || 'Untitled'), el('span', '', [it.author, it.year, it.publisher, it.pageCount ? it.pageCount + ' pages' : '', it.source].filter(Boolean).join(' · ')));
+  row.append(th, t); return row;
+}
+// a cover picture from the web, kept inside Margin so it shows offline; '' if the site does not allow that
+async function remoteCover(url) {
+  if (!url) return '';
+  try {
+    const r = await fetch(url, { mode: 'cors' }); if (!r.ok) return '';
+    const blob = await r.blob(); if (blob.size < 1200) return ''; // "no cover" placeholders
+    const u = URL.createObjectURL(blob); try { return await imageCover(u); } finally { URL.revokeObjectURL(u); }
+  } catch { return ''; }
+}
+// the picture to show for a book: its own cover, or a cover found online
+const coverSrc = (b) => (b && !b.plainCover ? b.cover || b.coverUrl || '' : '');
 
 /* ---------------- Book page ---------------- */
 // open a book to read (or go back to it if it is the open one)
@@ -830,8 +849,8 @@ async function showBookPage(id) {
   pg.innerHTML = ''; pg.hidden = false; $('catalog').hidden = true; $('folders').hidden = true; $('libtools').hidden = true;
   const back = el('button', 'btn back', '← Library'); back.onclick = () => { closeBookPage(); showLibrary(false); };
   const top = el('div', 'bp-top');
-  const cv = el('div', 'bp-cover');
-  if (b.cover && !b.plainCover) { const img = el('img'); img.src = b.cover; img.alt = ''; cv.append(img); } else cv.append(generatedCover(b));
+  const cv = el('div', 'bp-cover' + (b.wish ? ' wish' : ''));
+  if (coverSrc(b)) { const img = el('img'); img.src = coverSrc(b); img.alt = ''; cv.append(img); } else cv.append(generatedCover(b));
   const info = el('div', 'bp-info');
   info.append(el('h1', '', b.title || b.name));
   const au = authorText(b); info.append(el('div', 'bp-author', au || 'Author unknown'));
@@ -848,6 +867,21 @@ async function showBookPage(id) {
   const edit = el('button', 'btn tog', 'Edit details'); edit.onclick = () => openEditor(b);
   const find = el('button', 'btn tog', 'Find details online'); find.onclick = () => { openEditor(b); $('edFind').click(); };
   acts.append(read, star, done, edit, find);
+  if (b.wish) {
+    // on the Want to read list: no file yet
+    read.textContent = 'Add the file…'; read.title = 'Choose the PDF or EPUB when you have it';
+    read.onclick = () => pickWishFile(b);
+    const rm = el('button', 'btn tog', 'Remove from Want to read'); rm.onclick = async () => { await DB.delBook(b.id); closeBookPage(); showLibrary(false); toast('Removed from Want to read.'); };
+    acts.append(rm);
+    const m = wishMatch(b);
+    if (m) {
+      const note = el('div', 'bp-match');
+      note.append(el('span', '', 'This book is already in your library: '), el('b', '', m.title || m.name));
+      const use = el('button', 'btn primary', 'Use that book'); use.title = 'Join the two: the book in your library keeps its file and gets these details';
+      use.onclick = () => mergeWish(b, m);
+      note.append(use); info.append(note);
+    }
+  }
   info.append(acts);
   // facts
   const dl = el('dl', 'bp-facts');
@@ -856,13 +890,13 @@ async function showBookPage(id) {
   fact('Publisher', b.publisher);
   const np = b.kind === 'epub' ? b.pages : b.count;
   fact('Pages', np ? (b.kind === 'epub' && b.pagesEstimated ? `About ${np} (estimated)` : String(np)) : '');
-  fact('Format', `${(b.kind || 'pdf').toUpperCase()}${b.size ? ' · ' + (b.size >= 1048576 ? (b.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b.size / 1024)) + ' KB') : ''}`);
+  if (b.wish) fact('Format', 'Want to read · no file yet'); else fact('Format', `${(b.kind || 'pdf').toUpperCase()}${b.size ? ' · ' + (b.size >= 1048576 ? (b.size / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b.size / 1024)) + ' KB') : ''}`);
   fact('Language', langName(b.language));
   fact('ISBN', b.isbn);
   fact('DOI', b.doi);
   fact('Subjects', (b.subjects || []).join(' · '));
   const secs = sectionsOf(b);
-  if (secs.length) { const w = el('span', 'bp-secs'); for (const sname of secs) { const c = el('button', 'shelf', sname); c.onclick = () => { shelf = sname; store.set('shelf', sname); closeBookPage(); renderCatalog(); }; w.append(c); } fact('Sections', w); }
+  if (secs.length) { const w = el('span', 'bp-secs'); for (const sname of secs) { const c = el('button', 'shelf', sname); c.onclick = () => { shelf = sname; store.set('shelf', sname); closeBookPage(); renderCatalog(); }; w.append(c); } fact('Shelves', w); }
   fact('Added', fmtDate(b.added)); fact('Last read', fmtDate(b.opened));
   if (b.done && b.doneAt) fact('Finished', fmtDate(b.doneAt));
   if (b.path) { const p = el('span', 'bp-path', b.path); fact('File', p); }
@@ -994,25 +1028,26 @@ async function updateBook(id, patch) {
 const EYE_SVG = '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>';
 const STAR_SVG = '<svg viewBox="0 0 24 24"><path d="M12 3.2l2.7 5.6 6.1.8-4.5 4.2 1.1 6.1L12 17l-5.4 2.9 1.1-6.1-4.5-4.2 6.1-.8z"/></svg>';
 function bookCard(b) {
-  const card = el('div', 'bk' + (b.missing ? ' missing' : '') + (b.star ? ' starred' : '') + (b.done ? ' done' : '')); card.setAttribute('role', 'listitem'); card.dataset.id = b.id;
+  const card = el('div', 'bk' + (b.wish ? ' wish' : '') + (b.missing ? ' missing' : '') + (b.star ? ' starred' : '') + (b.done ? ' done' : '')); card.setAttribute('role', 'listitem'); card.dataset.id = b.id;
   card.draggable = true;
   const open = el('button', 'bk-open'); open.title = `Open ${b.title || b.name}`;
   const cv = el('div', 'bk-cover');
-  if (b.cover && !b.plainCover) { const img = el('img'); img.src = b.cover; img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; cv.append(img); } else cv.append(generatedCover(b));
+  if (coverSrc(b)) { const img = el('img'); img.src = coverSrc(b); img.alt = ''; img.loading = 'lazy'; img.decoding = 'async'; img.onerror = () => { img.replaceWith(generatedCover(b)); }; cv.append(img); } else cv.append(generatedCover(b));
   if (b.year) { const yr = el('span', 'bk-year', String(b.year)); yr.title = 'Year published'; cv.append(yr); }
   open.append(cv);
   open.onclick = (e) => { if (e.detail > 1) return; clearTimeout(open._t); open._t = setTimeout(() => showBookPage(b.id), 230); };
-  open.ondblclick = () => { clearTimeout(open._t); readBook(b); };
-  open.title = `${b.title || b.name} — click for details, double-click to read`;
+  open.ondblclick = () => { clearTimeout(open._t); if (b.wish) showBookPage(b.id); else readBook(b); };
+  open.title = b.wish ? `${b.title} — on your Want to read list (no file yet)` : `${b.title || b.name} — click for details, double-click to read`;
+  if (b.wish) { const tag = el('span', 'bk-wish', wishMatch(b) ? 'In your library' : 'Want to read'); cv.append(tag); }
   const title = el('div', 'bk-title', b.title || b.name); title.title = b.path || b.title || b.name;
   const author = el('div', 'bk-author', authorText(b)); author.title = authorText(b);
   const prog = el('div', 'bk-prog'); const bar = el('i'); bar.style.width = (b.done ? 100 : b.opened ? Math.max(2, bookProgress(b) * 100) : 0) + '%'; prog.append(bar);
   const sub = el('div', 'bk-sub');
-  const where = b.missing ? 'File not found' : b.done ? 'Read' : !b.opened ? 'New' : b.kind === 'epub' ? `${Math.round(bookProgress(b) * 100)}%` : `p. ${b.lastPage || 1}`;
+  const where = b.wish ? 'No file yet' : b.missing ? 'File not found' : b.done ? 'Read' : !b.opened ? 'New' : b.kind === 'epub' ? `${Math.round(bookProgress(b) * 100)}%` : `p. ${b.lastPage || 1}`;
   const right = el('span', 'bk-right');
   const np = b.kind === 'epub' ? b.pages : b.count;
   if (np) { const pg = el('span', 'bk-pages', `${b.kind === 'epub' && b.pagesEstimated ? '~' : ''}${np}p`); pg.title = b.kind === 'epub' && b.pagesEstimated ? `About ${np} printed page${np === 1 ? '' : 's'} (estimated from the length of the text)` : `${np} page${np === 1 ? '' : 's'}`; right.append(pg); }
-  right.append(el('span', 'bk-kind', (b.kind || 'pdf').toUpperCase()));
+  if (!b.wish) right.append(el('span', 'bk-kind', (b.kind || 'pdf').toUpperCase()));
   sub.append(el('span', '', where), right);
   const more = el('button', 'bk-more', '⋯'); more.title = 'Cover, shelves, remove'; more.setAttribute('aria-label', `Options for ${b.title || b.name}`);
   more.onclick = (e) => { e.stopPropagation(); openBookMenu(b, card); };
@@ -1067,9 +1102,9 @@ function updateStarFilter() {
 function renderCatalog() {
   const q = $('catSearch').value.trim().toLowerCase(); const sort = $('catSort').value;
   const key = (b) => (b.title || b.name || '').toLowerCase();
-  if (shelf !== 'all' && shelf !== '__none' && !allSections().includes(shelf)) { shelf = 'all'; store.set('shelf', shelf); }
+  if (shelf !== 'all' && shelf !== '__none' && shelf !== '__wish' && !allSections().includes(shelf)) { shelf = 'all'; store.set('shelf', shelf); }
   renderShelves();
-  const inShelf = (b) => shelf === 'all' || (shelf === '__none' ? !sectionsOf(b).length : sectionsOf(b).includes(shelf));
+  const inShelf = (b) => shelf === 'all' || (shelf === '__wish' ? !!b.wish : shelf === '__none' ? !sectionsOf(b).length : sectionsOf(b).includes(shelf));
   const list = libBooks.filter((b) => inShelf(b) && (!q || key(b).includes(q) || (b.author || '').toLowerCase().includes(q)) && (!starOnly || b.star) && (!readOnly || b.done));
   updateStarFilter();
   list.sort(sort === 'mine' ? (a, b) => (a.order ?? -1e15 - (a.added || 0)) - (b.order ?? -1e15 - (b.added || 0)) // new books (no place yet) first
@@ -1151,7 +1186,7 @@ function renderShelves() {
     c.append(el('span', '', label)); if (n != null) c.append(el('span', 'n', String(n)));
     // clicking the shelf that is already chosen goes back to All
     c.onclick = () => { shelf = shelf === id && id !== 'all' ? 'all' : id; store.set('shelf', shelf); renderCatalog(); };
-    if (id !== 'all' && id !== '__none') { // drop a cover on a section to add the book to it
+    if (id !== 'all' && id !== '__none' && id !== '__wish') { // drop a cover on a shelf to add the book to it
       c.ondragover = (e) => { if (dragCard) { e.preventDefault(); c.classList.add('drop'); } };
       c.ondragleave = () => c.classList.remove('drop');
       c.ondrop = async (e) => {
@@ -1166,12 +1201,13 @@ function renderShelves() {
   const fresh = count((b) => b.fresh);
   if (fresh) { const c = el('button', 'shelf new'); c.append(el('span', '', 'New'), el('span', 'n', String(fresh))); c.title = 'Check the details of newly added books'; c.onclick = showNewBooks; bar.append(c); }
   chip('all', 'All', libBooks.length);
+  const wished = count((b) => b.wish); if (wished) chip('__wish', 'Want to read', wished).classList.add('wishchip');
   for (const n of names) chip(n, n, count((b) => sectionsOf(b).includes(n)));
   const unsorted = count((b) => !sectionsOf(b).length);
   if (names.length && unsorted) chip('__none', 'Not on a shelf', unsorted);
   const add = el('button', 'shelf add', '+ New shelf'); add.onclick = () => { const n = askName('Name of the new shelf'); if (!n) return; if (!secPrefs.list.includes(n)) { secPrefs.list.push(n); saveSecPrefs(); } shelf = n; store.set('shelf', n); renderCatalog(); toast('Drag covers onto the shelf, or use ⋯ on a cover to add books.', 5000); };
   bar.append(add);
-  if (shelf !== 'all' && shelf !== '__none') {
+  if (shelf !== 'all' && shelf !== '__none' && shelf !== '__wish') {
     const m = el('button', 'shelf more', '⋯'); m.title = `Options for ${shelf}`; m.onclick = (e) => { e.stopPropagation(); openShelfMenu(shelf, m); }; bar.append(m);
   }
 }
@@ -1438,6 +1474,7 @@ $('bMenu').onclick = (e) => {
   const m = el('div', 'shelf-menu app-menu'); m.setAttribute('role', 'menu');
   const go = (fn) => () => { closeMenus(); fn(); };
   menuItem(m, 'Open a book…', go(() => $('bOpen').click())).append(el('kbd', '', 'PDF, EPUB'));
+  menuItem(m, 'Add to Want to read…', go(() => { if (S.view !== 'library') $('bLib').click(); openWish(); }));
   if (IN_APP) {
     menuItem(m, 'Add a book folder…', go(() => $('bAddFolder').click()));
     menuItem(m, 'Look for new books now', go(() => { if (!libraryOpen() || S.view !== 'library') $('bLib').click(); $('bScan').click(); }));
@@ -2132,6 +2169,7 @@ window.marginHost = {
   // the phone's Back button: one step back; false at the top, and Android puts Margin in the background
   back() {
     const dlg = document.querySelector('dialog[open]'); if (dlg) { dlg.close(); return true; }
+    const panel = document.querySelector('.review:not([hidden])'); if (panel) { panel.hidden = true; return true; }
     if (document.querySelector('.bk-menu, .shelf-menu')) { closeMenus(); return true; }
     if (document.fullscreenElement) { document.exitFullscreen(); return true; }
     if (libraryOpen()) {
@@ -2364,7 +2402,7 @@ async function showNotesPage() {
       const box = el('section', 'ap-book');
       const bh = el('div', 'ap-bhead');
       const th = el('button', 'ap-thumb'); th.title = 'Book details';
-      if (b?.cover && !b.plainCover) { const img = el('img'); img.src = b.cover; img.alt = ''; th.append(img); } else th.append(generatedCover(b || { name: '?' }));
+      if (coverSrc(b)) { const img = el('img'); img.src = coverSrc(b); img.alt = ''; th.append(img); } else th.append(generatedCover(b || { name: '?' }));
       const tt = el('div', 'ap-btitle'); const tb = el('button', '', bookName(bookId)); tt.append(tb, el('div', '', [b && authorText(b), `${items.length} highlight${items.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ')));
       if (b) th.onclick = tb.onclick = () => showBookPage(b.id);
       bh.append(th, tt); box.append(bh);
@@ -2556,6 +2594,106 @@ async function showTextPage(prefill) {
   setTimeout(() => ta.focus(), 50);
 }
 $('bText').onclick = () => showTextPage();
+/* ---------------- Want to read ----------------
+   Books you want but don't have yet: found online with their cover and details, shown in the
+   Library with a white border. When you get the file, add it (or join it to the copy that
+   arrived in your book folder). */
+const titleKey = (t) => String(t || '').toLowerCase().split(/[:(\[|]/)[0].replace(/^(the|a|an)\s+/, '').replace(/[^\p{L}\p{N}]+/gu, '');
+function wishMatch(w) {
+  const k = titleKey(w.title); if (k.length < 5) return null;
+  return libBooks.find((b) => !b.wish && b.kind !== 'text' && (() => { const t = titleKey(b.title || b.name); return t.length >= 5 && (t === k || t.startsWith(k) || k.startsWith(t)); })()) || null;
+}
+function pickWishFile(w) {
+  const inp = el('input'); inp.type = 'file'; inp.accept = '.pdf,.epub,application/pdf,application/epub+zip';
+  inp.onchange = async () => {
+    const f = inp.files[0]; if (!f) return;
+    const head = new Uint8Array(await f.slice(0, 5).arrayBuffer());
+    const kind = head[0] === 0x50 && head[1] === 0x4b ? 'epub' : head[0] === 0x25 && head[1] === 0x50 ? 'pdf' : '';
+    if (!kind) { toast('Margin reads PDF and EPUB files.'); return; }
+    await DB.putFile(w.id, f);
+    await updateBook(w.id, { wish: false, kind, size: f.size, name: f.name.replace(/\.(pdf|epub)$/i, ''), added: Date.now() });
+    toast('File added. It is now a book in your library.');
+    await refreshLibBooks(); showBookPage(w.id);
+  };
+  inp.click();
+}
+async function mergeWish(w, b) {
+  const patch = {};
+  for (const k of ['title', 'author', 'year', 'publisher', 'isbn', 'description', 'language', 'subjects']) if ((b[k] == null || b[k] === '' || (Array.isArray(b[k]) && !b[k].length)) && w[k]) patch[k] = w[k];
+  if (!coverSrc(b) && coverSrc(w)) { patch.cover = w.cover || ''; patch.coverUrl = w.coverUrl || ''; patch.plainCover = false; }
+  if (w.star && !b.star) patch.star = true;
+  const secs = [...new Set([...sectionsOf(b), ...sectionsOf(w)])]; if (secs.length) { patch.sections = secs; patch.sectionsSet = true; }
+  await updateBook(b.id, patch); await DB.delBook(w.id);
+  toast('Joined: the book in your library has the details now.');
+  await refreshLibBooks(); showBookPage(b.id);
+}
+let wishPick = null;
+function openWish(q = '') {
+  const d = $('wishDlg'); d.hidden = false; wishPick = null;
+  $('wqQuery').value = q; $('wishResults').hidden = true; $('wishResults').innerHTML = '';
+  for (const id of ['wTitle', 'wAuthor', 'wYear', 'wPublisher', 'wPages', 'wDesc']) $(id).value = '';
+  $('wCover').innerHTML = ''; $('wForm').hidden = true; $('wMsg').textContent = '';
+  $('wqQuery').focus();
+}
+function closeWish() { $('wishDlg').hidden = true; wishPick = null; }
+$('wCancel').onclick = closeWish;
+$('wishDlg').addEventListener('click', (e) => { if (e.target.id === 'wishDlg') closeWish(); });
+$('wishDlg').addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeWish(); } });
+const wishPreview = () => {
+  const b = { title: $('wTitle').value || 'Untitled', author: $('wAuthor').value, year: +$('wYear').value || null };
+  const box = $('wCover'); box.innerHTML = '';
+  if (wishPick?.cover) { const img = el('img'); img.src = wishPick.cover; img.alt = ''; img.onerror = () => { img.replaceWith(generatedCover(b)); }; box.append(img); } else box.append(generatedCover(b));
+};
+for (const id of ['wTitle', 'wAuthor', 'wYear']) $(id).addEventListener('input', debounce(() => { if (!wishPick?.cover) wishPreview(); }, 250));
+$('wqForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const q = $('wqQuery').value.trim(); if (!q) return;
+  const box = $('wishResults'); box.hidden = false; box.innerHTML = ''; box.append(el('div', 'due', 'Searching Open Library and Google Books…'));
+  const digits = q.replace(/[^\dXx]/g, '');
+  const isbn = /^(97[89])?\d{9}[\dXx]$/.test(digits) && digits.length >= 10 && q.replace(/[\d\sXx-]/g, '') === '' ? digits : '';
+  const [t, a] = q.split(/\s+by\s+|\s+[-–]\s+/i);
+  const { items, errors } = await searchBooks({ title: isbn ? '' : t, author: isbn ? '' : a || '', isbn });
+  box.innerHTML = '';
+  if (!items.length) {
+    box.append(el('div', 'due', navigator.onLine === false ? 'Finding books needs internet. You can still type the details below.' : errors.length === 2 ? `The search didn't work: ${errors.join('; ')}. Try again in a minute, or type the details below.` : 'Nothing found. Try the title only, or the ISBN. Or type the details below.'));
+    $('wForm').hidden = false; if (!$('wTitle').value) $('wTitle').value = t || q; wishPreview(); return;
+  }
+  box.append(el('div', 'due', 'Pick the book you want.' + (errors.length ? ` (${errors[0]}, so only the other source is shown.)` : '')));
+  for (const it of items) {
+    const row = resultRow(it);
+    row.onclick = async () => {
+      box.querySelectorAll('.res').forEach((x) => x.classList.remove('on')); row.classList.add('on');
+      wishPick = it; $('wForm').hidden = false;
+      $('wTitle').value = it.title || ''; $('wAuthor').value = it.author || ''; $('wYear').value = it.year || '';
+      $('wPublisher').value = it.publisher || ''; $('wPages').value = it.pageCount || ''; $('wDesc').value = it.description || '';
+      wishPreview();
+      if (!it.description && it.key) { const dsc = await olDescription(it.key); if (dsc && wishPick === it) { it.description = dsc; if (!$('wDesc').value.trim()) $('wDesc').value = dsc; } }
+      $('wAdd').focus();
+    };
+    box.append(row);
+  }
+  const manual = el('button', 'linkbtn', 'None of these: type the details myself'); manual.type = 'button';
+  manual.onclick = () => { wishPick = null; box.querySelectorAll('.res').forEach((x) => x.classList.remove('on')); $('wForm').hidden = false; $('wTitle').value = t || q; $('wAuthor').value = a || ''; wishPreview(); $('wTitle').focus(); };
+  box.append(manual);
+};
+$('wAdd').onclick = async () => {
+  const title = $('wTitle').value.trim(); if (!title) { $('wMsg').textContent = 'A title is needed.'; $('wTitle').focus(); return; }
+  $('wAdd').disabled = true; $('wMsg').textContent = 'Adding…';
+  const it = wishPick || {};
+  const now = Date.now();
+  const b = {
+    id: 'wish-' + now, wish: true, name: title, title, author: $('wAuthor').value.trim(), year: +$('wYear').value || null,
+    publisher: $('wPublisher').value.trim(), description: $('wDesc').value.trim(), count: +$('wPages').value || 0,
+    isbn: it.isbn || '', language: it.language || '', subjects: it.subjects || [], added: now,
+  };
+  if (shelf !== 'all' && shelf !== '__none' && shelf !== '__wish') { b.sections = [shelf]; b.sectionsSet = true; }
+  if (it.cover) { b.cover = await remoteCover(it.cover); if (!b.cover) b.coverUrl = it.cover; }
+  await DB.putBook(b);
+  $('wAdd').disabled = false; closeWish();
+  toast(`Added to Want to read: ${title}`);
+  await showLibrary(false);
+};
+$('bWish').onclick = () => openWish();
 $('bNotes').onclick = () => showNotesPage();
 $('bWords').onclick = () => showWordsPage();
 

@@ -201,6 +201,23 @@ select{border:1px solid var(--line);border-radius:6px;background:var(--bg);paddi
 .bp-desc p{font:16px/1.65 var(--read);margin:0 0 .8em}
 @media (max-width:640px){.bp-top{grid-template-columns:1fr}.bp-cover{max-width:200px}}
 
+/* Want to read */
+.bk.wish .bk-cover{outline:4px solid #fff;outline-offset:-4px;box-shadow:0 0 0 1px rgb(0 0 0/.25),0 3px 10px rgb(0 0 0/.3)}
+.bk-wish{position:absolute;left:6px;bottom:6px;background:#fff;color:#111;font:600 10.5px/1 var(--ui,system-ui);padding:4px 7px;border-radius:999px;letter-spacing:.02em;box-shadow:0 1px 3px rgb(0 0 0/.3)}
+.shelf.wishchip{border-color:#fff}
+.shelf.wishchip.on{background:#fff;color:#111}
+.bp-cover.wish{outline:5px solid #fff;outline-offset:-5px}
+.bp-match{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 0;padding:10px 12px;border:1px solid var(--accent);border-radius:8px;background:color-mix(in srgb,var(--accent) 9%,transparent)}
+.rcard.wish{width:min(680px,100%)}
+.wq{display:flex;gap:8px}.wq input{flex:1;min-width:0}
+.wform{display:grid;grid-template-columns:120px 1fr;gap:6px 16px;margin-top:8px}
+.wcover{grid-row:span 1;width:120px;aspect-ratio:2/3;border-radius:3px 6px 6px 3px;overflow:hidden;outline:4px solid #fff;outline-offset:-4px;box-shadow:0 2px 8px rgb(0 0 0/.3);align-self:start;margin-top:22px}
+.wcover img{width:100%;height:100%;object-fit:cover;display:block}
+.wcover .gen{height:100%}
+.wfields{display:grid;gap:2px}
+.wrow{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.wdesc{grid-column:1/-1;display:grid;gap:2px}
+@media (max-width:520px){.wform{grid-template-columns:90px 1fr}.wcover{width:90px}}
 /* Text page */
 .tx-box{display:grid;gap:10px;max-width:820px}
 .tx-title{font:600 17px/1.3 var(--read);padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--fg)}
@@ -317,6 +334,11 @@ mark.q{background:color-mix(in srgb,#f2c94c 55%,transparent);color:inherit;borde
 .edResults .res:hover{background:color-mix(in srgb,var(--fg) 6%,transparent)}
 .edResults .res.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 9%,transparent)}
 .edResults .rt{display:grid;gap:2px}.edResults .rt span{font-size:12px;color:var(--muted)}
+.edResults .res{display:flex;gap:10px;align-items:center}
+.edResults .rth{display:block;width:34px;height:50px;flex:none;border-radius:2px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:hidden}
+.edResults .rth img{width:100%;height:100%;object-fit:cover;display:block}
+.edResults .linkbtn{justify-self:start;margin:4px 9px}
+#wishResults{max-height:min(320px,40vh);overflow:auto}
 .edDoi{display:flex;gap:8px}.edDoi input{flex:1;min-width:0}.edDoi .btn{border-color:var(--line);flex:none}
 .rcard.edit .rbtns{justify-content:flex-end;margin-top:8px}
 
@@ -496,6 +518,7 @@ mark.q{background:color-mix(in srgb,#f2c94c 55%,transparent);color:inherit;borde
           <button class="btn back" id="bBack" hidden></button>
           <h1>Library</h1><span class="cat-count" id="catCount"></span>
           <span class="sp"></span>
+          <button class="btn" id="bWish" title="Add a book you want but don't have yet, with its cover and details">+ Want to read</button>
           <button class="btn primary" id="bOpen3">Add a book</button>
           <div class="cat-tools">
             <input id="catSearch" type="search" placeholder="Search titles and authors" aria-label="Search the library">
@@ -573,6 +596,26 @@ mark.q{background:color-mix(in srgb,#f2c94c 55%,transparent);color:inherit;borde
     <p class="due" id="edMsg" role="status"></p>
     <div class="rbtns"><button type="button" class="btn" id="edCancel">Cancel</button><button type="submit" class="btn primary">Save</button></div>
   </form>
+</div>
+<div class="review" id="wishDlg" hidden>
+  <div class="rcard edit wish" role="dialog" aria-modal="true" aria-labelledby="wHead">
+    <div class="edHead"><h2 id="wHead">Add to Want to read</h2></div>
+    <p class="due">A book you want but don't have yet. Find it online for its cover and details; add the file later.</p>
+    <form class="wq" id="wqForm"><input id="wqQuery" type="search" placeholder="Title, author or ISBN" aria-label="Find a book"><button class="btn primary" type="submit">Search</button></form>
+    <div class="edResults" id="wishResults" hidden></div>
+    <div class="wform" id="wForm" hidden>
+      <div class="wcover" id="wCover"></div>
+      <div class="wfields">
+        <label for="wTitle">Title</label><input id="wTitle">
+        <label for="wAuthor">Author</label><input id="wAuthor">
+        <div class="wrow"><div><label for="wYear">Year</label><input id="wYear" inputmode="numeric" maxlength="4"></div><div><label for="wPages">Pages</label><input id="wPages" inputmode="numeric" maxlength="5"></div></div>
+        <label for="wPublisher">Publisher</label><input id="wPublisher">
+      </div>
+      <div class="wdesc"><label for="wDesc">Description</label><textarea id="wDesc" rows="4"></textarea></div>
+    </div>
+    <p class="due" id="wMsg" role="status"></p>
+    <div class="rbtns"><button type="button" class="btn" id="wCancel">Cancel</button><button type="button" class="btn primary" id="wAdd">Add to Want to read</button></div>
+  </div>
 </div>
 <div class="review" id="review" hidden>
   <div class="rcard" role="dialog" aria-modal="true" aria-label="Review saved words">
