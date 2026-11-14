@@ -1,0 +1,10 @@
+build/
+host/lib/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/www/
+android/local.properties
+*.p12
+*.zip
+share/*.zip

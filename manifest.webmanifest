@@ -1,0 +1,9 @@
+{
+  "name": "Margin Reader",
+  "short_name": "Margin",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#e9ecea",
+  "theme_color": "#23577a",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

@@ -1,0 +1,26 @@
+MARGIN - read, mark up and listen to PDF and EPUB books (Windows)
+==================================================================
+
+Install
+  1. Unzip this folder (right-click the zip > Extract All).
+  2. Double-click "Install Margin".
+     If Windows says "Windows protected your PC", click "More info" > "Run anyway".
+     (Margin is a small home-made app, so it isn't signed by a big publisher.)
+  3. Margin opens, and there's a Margin shortcut on your Desktop and in the Start menu.
+
+Getting started
+  - Press "Open" (or drag a PDF or EPUB onto the window). Books stay on your PC.
+  - Library > "Add a folder": Margin brings in every PDF and EPUB in that folder
+    and checks it for new ones each time it starts (the files are never copied).
+  - Highlight: select text and pick a colour. "Note" adds a note to it.
+  - Save word: select or double-click a word > "Save word". Review them as
+    flashcards in the Words tab.
+  - Listen: reads aloud from where you are, with the spoken word underlined.
+    The natural "neural" voice downloads once (about 90 MB, needs internet the
+    first time); after that everything works offline.
+  - Minimize Margin while it reads and a small pause button stays on top of your
+    other windows. The taskbar preview and your keyboard's play/pause key work too.
+  - Library > "Back up library" saves all books, notes and words in one file.
+
+Everything stays on your PC. To remove Margin, double-click "Uninstall Margin".
+Needs Windows 10 or 11 (with the Microsoft Edge WebView2 Runtime, which almost all PCs have).

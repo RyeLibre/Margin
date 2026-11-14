@@ -1,0 +1,43 @@
+plugins { id 'com.android.application' }
+
+// version: the number of the GitHub build, so each new build installs over the last one
+def buildNo = (System.getenv('GITHUB_RUN_NUMBER') ?: '1') as int
+
+android {
+    namespace 'app.margin.reader'
+    compileSdk 34
+    defaultConfig {
+        applicationId 'app.margin.reader'
+        minSdk 29
+        targetSdk 34
+        versionCode buildNo
+        versionName "1.2." + buildNo
+    }
+    signingConfigs {
+        release {
+            // the same key every time, so updates install over the old app (kept as a GitHub secret)
+            storeFile file(System.getenv('MARGIN_KEYSTORE') ?: 'margin.p12')
+            storePassword System.getenv('MARGIN_KEY_PASSWORD') ?: 'margin'
+            keyAlias 'margin'
+            keyPassword System.getenv('MARGIN_KEY_PASSWORD') ?: 'margin'
+            storeType 'pkcs12'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+    buildFeatures { buildConfig true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    androidResources { noCompress += ['wasm', 'mjs', 'js', 'pdf', 'bcmap'] }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+    implementation 'androidx.media:media:1.7.0'
+}
