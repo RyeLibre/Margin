@@ -30,17 +30,16 @@ jobs:
       - name: Signing key (the same every time, so updates install over the old app)
         id: key
         env:
-          KEY: ${{ secrets.MARGIN_KEYSTORE_B64 }}
+          PW: ${{ secrets.MARGIN_KEY_PASSWORD }}
         run: |
-          if [ -n "$KEY" ]; then
-            # spaces or line breaks picked up while pasting the secret are ignored
-            printf '%s' "$KEY" | tr -cd 'A-Za-z0-9+/=' | base64 -d > android/app/margin.p12 || true
-            got=$(sha256sum android/app/margin.p12 | cut -c1-64)
-            echo "key fingerprint: $got (expected feaf1f72bf671452cb67b79edee64abb41be3c8ff8bebf0a706e96cc9a3d9fe3)"
-            if [ "$got" != "feaf1f72bf671452cb67b79edee64abb41be3c8ff8bebf0a706e96cc9a3d9fe3" ]; then echo "::error::The MARGIN_KEYSTORE_B64 secret is not the Margin key. Paste the whole of MARGIN_KEYSTORE_B64.txt again."; exit 1; fi
-            echo "real=yes" >> "$GITHUB_OUTPUT"
+          # the key is stored in the repository locked with the MARGIN_KEY_PASSWORD secret
+          pw=$(printf '%s' "$PW" | tr -d ' \r\n\t')
+          if [ -n "$pw" ] && openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in android/margin.p12.enc -out android/app/margin.p12 -pass pass:"$pw" 2>/dev/null \
+             && [ "$(sha256sum android/app/margin.p12 | cut -c1-64)" = "feaf1f72bf671452cb67b79edee64abb41be3c8ff8bebf0a706e96cc9a3d9fe3" ]; then
+            echo "real=yes" >> "$GITHUB_OUTPUT"; echo "Signing with the Margin key"
           else
-            # no key stored yet: a throwaway one, only to check that the app builds (not published)
+            echo "::warning::MARGIN_KEY_PASSWORD is missing or wrong, so this build is only a test and is not published."
+            rm -f android/app/margin.p12
             keytool -genkeypair -keystore android/app/margin.p12 -storetype pkcs12 -alias margin -keyalg RSA -keysize 2048 \
               -validity 30 -storepass margin -keypass margin -dname "CN=Margin test build"
             echo "real=no" >> "$GITHUB_OUTPUT"
@@ -48,7 +47,7 @@ jobs:
       - name: Build
         working-directory: android
         env:
-          MARGIN_KEY_PASSWORD: ${{ secrets.MARGIN_KEY_PASSWORD }}
+          MARGIN_KEY_PASSWORD: ${{ steps.key.outputs.real == 'yes' && secrets.MARGIN_KEY_PASSWORD || 'margin' }}
         run: gradle assembleRelease --no-daemon --stacktrace
       - name: Collect
         run: cp android/app/build/outputs/apk/release/app-release.apk Margin.apk
