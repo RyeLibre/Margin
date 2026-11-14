@@ -35,7 +35,7 @@
   function speakFrom(u, offset) {
     const id = 'u' + (++useq);
     utts.set(id, { u, offset }); current = { id, u, offset, last: offset };
-    A.ttsSpeak(id, u.text.slice(offset), u.voice ? u.voice.voiceURI : '', +u.rate || 1, +u.pitch || 1);
+    A.ttsSpeak(id, u.text.slice(offset), u.voice ? u.voice.voiceURI : '', +u.rate || 1, +u.pitch || 1, u.volume == null ? 1 : Math.max(0, Math.min(1, +u.volume)));
   }
   window.__tts = (id, type, ch) => {
     const rec = utts.get(id); if (!rec) return;

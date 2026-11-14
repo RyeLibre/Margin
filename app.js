@@ -1521,6 +1521,30 @@ const T = {
   worker: null, ready: false, loading: null, reqId: 0, pending: new Map(), audio: new Map(), ctx: null, src: null, wake: null,
 };
 const engineSel = $('engine'), voiceSel = $('voice'), speedSel = $('speed');
+/* Margin's own volume, separate from the computer's: the neural voice changes at once,
+   the system voice from the next sentence. Up to 150% for the neural voice (quiet books). */
+T.volume = Math.max(0, Math.min(1.5, +store.get('volume', 1) || 0));
+T.muted = false;
+function volumeOut() {
+  T.ctx ??= new AudioContext();
+  if (!T.gain) { T.gain = T.ctx.createGain(); T.gain.connect(T.ctx.destination); }
+  T.gain.gain.value = T.muted ? 0 : T.volume;
+  return T.gain;
+}
+function showVolume() {
+  const v = T.muted ? 0 : T.volume, pct = Math.round(v * 100);
+  const r = $('volume'); if (+r.value !== Math.round(T.volume * 100)) r.value = Math.round(T.volume * 100);
+  r.style.setProperty('--fill', (Math.round(T.volume * 100) / 1.5) + '%');
+  r.title = `Volume ${pct}%` + (T.engine === 'system' && T.volume > 1 ? ' (the system voice stops at 100%)' : '');
+  $('volPct').textContent = pct + '%';
+  const b = $('bVol'); b.classList.toggle('muted', v === 0); b.title = v === 0 ? 'Sound off. Click to turn it back on' : 'Click to turn the sound off';
+  b.querySelector('.w1').style.opacity = v > 0 ? 1 : 0; b.querySelector('.w2').style.opacity = v > 0.66 ? 1 : 0; b.querySelector('.x').style.opacity = v === 0 ? 1 : 0;
+  if (T.gain) T.gain.gain.setTargetAtTime(v, T.ctx.currentTime, 0.03);
+}
+$('volume').addEventListener('input', (e) => { T.volume = +e.target.value / 100; T.muted = false; store.set('volume', T.volume); showVolume(); });
+$('volume').addEventListener('wheel', (e) => { e.preventDefault(); const r = $('volume'); r.value = Math.max(0, Math.min(150, +r.value + (e.deltaY < 0 ? 5 : -5))); r.dispatchEvent(new Event('input')); }, { passive: false });
+$('bVol').onclick = () => { if (T.volume === 0) { T.volume = 1; store.set('volume', 1); T.muted = false; } else T.muted = !T.muted; showVolume(); };
+showVolume();
 engineSel.value = T.engine; speedSel.value = String(T.speed); $('bFollow').classList.toggle('on', T.follow);
 
 function setStatus(html, progress) {
@@ -1709,7 +1733,7 @@ async function speakKokoro(sent, page, i, tok) {
   T.ctx ??= new AudioContext();
   if (T.ctx.state === 'suspended' && !T.paused) await T.ctx.resume();
   const buf = T.ctx.createBuffer(1, pcm.length, sr); buf.copyToChannel(pcm, 0);
-  const src = T.ctx.createBufferSource(); src.buffer = buf; src.connect(T.ctx.destination);
+  const src = T.ctx.createBufferSource(); src.buffer = buf; src.connect(volumeOut());
   T.src = src;
   const times = wordTimes(sent, pcm, sr); const startAt = T.ctx.currentTime + 0.02;
   let ended = false;
@@ -1726,7 +1750,7 @@ function speakSystem(sent, tok) {
   return new Promise((res) => {
     const u = new SpeechSynthesisUtterance(sent.text);
     const v = speechSynthesis.getVoices().find((v) => v.voiceURI === T.voice); if (v) { u.voice = v; u.lang = v.lang; }
-    u.rate = T.speed; u.onend = u.onerror = () => res();
+    u.rate = T.speed; u.volume = Math.min(1, T.volume); u.onend = u.onerror = () => res();
     u.onboundary = (e) => { if (tok === T.token && (e.name === 'word' || e.name === undefined)) markWord(wordAtChar(sent, e.charIndex)); };
     T.utter = u; speechSynthesis.speak(u);
   });
@@ -2541,10 +2565,10 @@ async function sayText(text) {
     try {
       const { pcm, sr } = await kokoroAudio(`say:${text}:${T.voice}`, text);
       T.ctx ??= new AudioContext(); if (T.ctx.state === 'suspended') await T.ctx.resume();
-      const b = T.ctx.createBuffer(1, pcm.length, sr); b.copyToChannel(pcm, 0); const src = T.ctx.createBufferSource(); src.buffer = b; src.connect(T.ctx.destination); src.start(); return;
+      const b = T.ctx.createBuffer(1, pcm.length, sr); b.copyToChannel(pcm, 0); const src = T.ctx.createBufferSource(); src.buffer = b; src.connect(volumeOut()); src.start(); return;
     } catch {}
   }
-  if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(text); const v = speechSynthesis.getVoices().find((v) => v.voiceURI === store.get('voice.system', '')) || speechSynthesis.getVoices().find((v) => v.lang.startsWith('en')); if (v) u.voice = v; speechSynthesis.speak(u); }
+  if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(text); u.volume = Math.min(1, T.volume); const v = speechSynthesis.getVoices().find((v) => v.voiceURI === store.get('voice.system', '')) || speechSynthesis.getVoices().find((v) => v.lang.startsWith('en')); if (v) u.voice = v; speechSynthesis.speak(u); }
 }
 
 /* review: show word + its sentence, reveal meaning, grade */

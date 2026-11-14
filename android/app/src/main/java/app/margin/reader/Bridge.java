@@ -298,7 +298,7 @@ public class Bridge {
     }
 
     @JavascriptInterface
-    public void ttsSpeak(String id, String text, String voice, float rate, float pitch) {
+    public void ttsSpeak(String id, String text, String voice, float rate, float pitch, float volume) {
         if (!ttsReady) { send(id, "error", 0); return; }
         try {
             Voice v = voice == null || voice.isEmpty() ? null : voiceByName.get(voice);
@@ -306,7 +306,9 @@ public class Bridge {
             else if (tts.getDefaultVoice() != null) tts.setVoice(tts.getDefaultVoice());
             tts.setSpeechRate(rate > 0 ? rate : 1f);
             tts.setPitch(pitch > 0 ? pitch : 1f);
-            if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, new Bundle(), id) != TextToSpeech.SUCCESS) send(id, "error", 0);
+            Bundle params = new Bundle();
+            params.putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, Math.max(0f, Math.min(1f, volume)));
+            if (tts.speak(text, TextToSpeech.QUEUE_FLUSH, params, id) != TextToSpeech.SUCCESS) send(id, "error", 0);
         } catch (Exception e) { send(id, "error", 0); }
     }
 
