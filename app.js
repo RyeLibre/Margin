@@ -1014,7 +1014,7 @@ function bookCard(b) {
   if (np) { const pg = el('span', 'bk-pages', `${b.kind === 'epub' && b.pagesEstimated ? '~' : ''}${np}p`); pg.title = b.kind === 'epub' && b.pagesEstimated ? `About ${np} printed page${np === 1 ? '' : 's'} (estimated from the length of the text)` : `${np} page${np === 1 ? '' : 's'}`; right.append(pg); }
   right.append(el('span', 'bk-kind', (b.kind || 'pdf').toUpperCase()));
   sub.append(el('span', '', where), right);
-  const more = el('button', 'bk-more', '⋯'); more.title = 'Cover, sections, remove'; more.setAttribute('aria-label', `Options for ${b.title || b.name}`);
+  const more = el('button', 'bk-more', '⋯'); more.title = 'Cover, shelves, remove'; more.setAttribute('aria-label', `Options for ${b.title || b.name}`);
   more.onclick = (e) => { e.stopPropagation(); openBookMenu(b, card); };
   card.confirmRemove = () => {
     if (card.querySelector('.bk-confirm')) return;
@@ -1147,9 +1147,10 @@ function renderShelves() {
   const names = allSections();
   const count = (fn) => libBooks.filter(fn).length;
   const chip = (id, label, n) => {
-    const c = el('button', 'shelf' + (shelf === id ? ' on' : '')); c.setAttribute('role', 'tab'); c.setAttribute('aria-selected', String(shelf === id));
+    const c = el('button', 'shelf' + (shelf === id ? ' on' : '')); if (shelf === id && id !== 'all') c.title = 'Click again to show all books'; c.setAttribute('role', 'tab'); c.setAttribute('aria-selected', String(shelf === id));
     c.append(el('span', '', label)); if (n != null) c.append(el('span', 'n', String(n)));
-    c.onclick = () => { shelf = id; store.set('shelf', shelf); renderCatalog(); };
+    // clicking the shelf that is already chosen goes back to All
+    c.onclick = () => { shelf = shelf === id && id !== 'all' ? 'all' : id; store.set('shelf', shelf); renderCatalog(); };
     if (id !== 'all' && id !== '__none') { // drop a cover on a section to add the book to it
       c.ondragover = (e) => { if (dragCard) { e.preventDefault(); c.classList.add('drop'); } };
       c.ondragleave = () => c.classList.remove('drop');
@@ -1167,8 +1168,8 @@ function renderShelves() {
   chip('all', 'All', libBooks.length);
   for (const n of names) chip(n, n, count((b) => sectionsOf(b).includes(n)));
   const unsorted = count((b) => !sectionsOf(b).length);
-  if (names.length && unsorted) chip('__none', 'Not in a section', unsorted);
-  const add = el('button', 'shelf add', '+ New section'); add.onclick = () => { const n = askName('Name of the new section'); if (!n) return; if (!secPrefs.list.includes(n)) { secPrefs.list.push(n); saveSecPrefs(); } shelf = n; store.set('shelf', n); renderCatalog(); toast('Drag covers onto the section, or use ⋯ on a cover to add books.', 5000); };
+  if (names.length && unsorted) chip('__none', 'Not on a shelf', unsorted);
+  const add = el('button', 'shelf add', '+ New shelf'); add.onclick = () => { const n = askName('Name of the new shelf'); if (!n) return; if (!secPrefs.list.includes(n)) { secPrefs.list.push(n); saveSecPrefs(); } shelf = n; store.set('shelf', n); renderCatalog(); toast('Drag covers onto the shelf, or use ⋯ on a cover to add books.', 5000); };
   bar.append(add);
   if (shelf !== 'all' && shelf !== '__none') {
     const m = el('button', 'shelf more', '⋯'); m.title = `Options for ${shelf}`; m.onclick = (e) => { e.stopPropagation(); openShelfMenu(shelf, m); }; bar.append(m);
@@ -1190,15 +1191,15 @@ function openBookMenu(b, card) {
   menuItem(m, b.plainCover ? 'Use the book’s own cover' : 'Use a designed cover', async () => {
     b.plainCover = !b.plainCover; await updateBook(b.id, { plainCover: b.plainCover }); closeMenus(); card.replaceWith(bookCard(b));
   });
-  m.append(el('div', 'ml', 'Sections'));
+  m.append(el('div', 'ml', 'Shelves'));
   const mine = sectionsOf(b);
   for (const name of allSections()) {
     const lab = el('label', 'mc'); const cb = el('input'); cb.type = 'checkbox'; cb.checked = mine.includes(name);
     cb.onchange = async () => { const cur = new Set(sectionsOf(b)); if (cb.checked) cur.add(name); else cur.delete(name); await setSections(b, [...cur]); menuDirty = true; renderShelves(); };
     lab.append(cb, el('span', '', name)); m.append(lab);
   }
-  menuItem(m, '+ New section…', async () => {
-    const n = askName('Name of the new section'); if (!n) return;
+  menuItem(m, '+ New shelf…', async () => {
+    const n = askName('Name of the new shelf'); if (!n) return;
     if (!secPrefs.list.includes(n)) { secPrefs.list.push(n); saveSecPrefs(); }
     await setSections(b, [...sectionsOf(b), n]); menuDirty = true; closeMenus(); toast(`Added to ${n}.`);
   });
@@ -1210,8 +1211,8 @@ function openShelfMenu(name, anchor) {
   closeMenus();
   const m = el('div', 'shelf-menu'); m.setAttribute('role', 'menu');
   const books = () => libBooks.filter((b) => sectionsOf(b).includes(name));
-  menuItem(m, 'Rename section…', async () => {
-    const n = askName('New name for this section', name); if (!n || n === name) return;
+  menuItem(m, 'Rename shelf…', async () => {
+    const n = askName('New name for this shelf', name); if (!n || n === name) return;
     for (const b of books()) if (b.sections?.includes(name)) await setSections(b, b.sections.map((x) => (x === name ? n : x)));
     for (const [auto, shown] of Object.entries(secPrefs.rename)) if (shown === name) secPrefs.rename[auto] = n;
     for (const b of libBooks) if (b.autoSection && !b.sectionsSet && (secPrefs.rename[b.autoSection] || b.autoSection) === name) secPrefs.rename[b.autoSection] = n;
@@ -1221,8 +1222,8 @@ function openShelfMenu(name, anchor) {
   menuItem(m, 'Designed covers for all books here', async () => { for (const b of books()) if (!b.plainCover) { b.plainCover = true; await updateBook(b.id, { plainCover: true }); } closeMenus(); renderCatalog(); });
   menuItem(m, 'Book covers for all books here', async () => { for (const b of books()) if (b.plainCover) { b.plainCover = false; await updateBook(b.id, { plainCover: false }); } closeMenus(); renderCatalog(); });
   m.append(el('div', 'msep'));
-  menuItem(m, 'Delete section (books stay in the library)', async () => {
-    let ok = true; try { ok = confirm(`Delete the section "${name}"? Its books stay in the library.`); } catch {}
+  menuItem(m, 'Delete shelf (books stay in the library)', async () => {
+    let ok = true; try { ok = confirm(`Delete the shelf "${name}"? Its books stay in the library.`); } catch {}
     if (!ok) return;
     for (const b of books()) if (b.sections?.includes(name)) await setSections(b, b.sections.filter((x) => x !== name));
     for (const b of libBooks) if (b.autoSection && (secPrefs.rename[b.autoSection] || b.autoSection) === name && !secPrefs.drop.includes(b.autoSection)) secPrefs.drop.push(b.autoSection);
